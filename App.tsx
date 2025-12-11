@@ -1,16 +1,20 @@
-import React, { useState } from 'react';
+
+import React, { useState, useRef } from 'react';
 import { Page, PageElement, ElementType } from './types';
 import { TransformableElement } from './components/TransformableElement';
 import { 
   Plus, Trash, ChevronLeft, ChevronRight, Image as ImageIcon, 
-  Type as TypeIcon, StickyNote, Edit3, Check, ArrowLeft
+  Type as TypeIcon, StickyNote, Edit3, Check, ArrowLeft, 
+  Square, Circle, Triangle, Star, Minus, Grid, Layout,
+  Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight,
+  MousePointer, Video, Music
 } from 'lucide-react';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
 
 const INITIAL_PAGES: Page[] = [
   { id: 'cover', background: 'manga-lines', elements: [
-      { id: 'title', type: 'text', content: '我的漫画手账\nJOURNAL', x: 50, y: 150, width: 300, height: 200, rotation: -5, zIndex: 1, styleType: 'normal', fontFamily: 'hand', color: '#000000', fontWeight: 'bold', fontSize: 48 }
+      { id: 'title', type: 'text', content: '我的漫画手账\nJOURNAL', x: 50, y: 150, width: 300, height: 200, rotation: -5, zIndex: 1, styleType: 'normal', fontFamily: 'hand', color: '#000000', fontWeight: 'bold', fontSize: 48, textAlign: 'center' }
   ] },
   { id: 'p1', background: 'white', elements: [] },
   { id: 'p2', background: 'dots', elements: [] },
@@ -21,6 +25,11 @@ export default function App() {
   const [viewIndex, setViewIndex] = useState(0); 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingPageId, setEditingPageId] = useState<string | null>(null);
+  
+  // Drawing State
+  const [drawMode, setDrawMode] = useState<{ type: ElementType | 'shape', shapeType?: PageElement['shapeType'] } | null>(null);
+  const [isDrawing, setIsDrawing] = useState(false);
+  const drawingStartRef = useRef<{ x: number, y: number } | null>(null);
   
   // Animation state
   const [isFlipping, setIsFlipping] = useState(false);
@@ -73,41 +82,120 @@ export default function App() {
     }, 600);
   };
 
-  const addElement = (type: ElementType, content: string = '') => {
-    if (!editingPageId) return;
+  // --- Drawing Logic ---
 
-    const pageIndex = pages.findIndex(p => p.id === editingPageId);
-    if (pageIndex === -1) return;
+  const startDrawing = (type: ElementType, shapeType?: PageElement['shapeType']) => {
+    setDrawMode({ type: type === 'shape' ? 'shape' : type, shapeType });
+    setSelectedId(null); // Deselect current to focus on drawing
+  };
 
+  const handlePageMouseDown = (e: React.PointerEvent, pageId: string) => {
+    if (!drawMode || pageId !== editingPageId) return;
+    
+    e.preventDefault();
+    e.stopPropagation();
+
+    const rect = e.currentTarget.getBoundingClientRect();
+    const x = e.clientX - rect.left;
+    const y = e.clientY - rect.top;
+
+    drawingStartRef.current = { x, y };
+    setIsDrawing(true);
+
+    // Create temp element
+    const id = generateId();
     const newElement: PageElement = {
-      id: generateId(),
-      type,
-      content: content || (type === 'text' ? '新文字' : ''),
-      x: 100 + Math.random() * 50,
-      y: 100 + Math.random() * 50,
-      width: type === 'sticker' ? 100 : 200,
-      height: type === 'sticker' ? 100 : 100,
-      rotation: (Math.random() - 0.5) * 10,
-      zIndex: 10,
-      styleType: type === 'sticker' ? 'tape' : 'normal',
-      fontFamily: 'hand',
-      color: '#000000',
-      fontSize: 24,
-      fontWeight: 'normal',
-      fontStyle: 'normal',
-      textDecoration: 'none',
+        id,
+        type: drawMode.type === 'shape' ? 'shape' : drawMode.type,
+        content: drawMode.type === 'text' ? '请输入文本' : '',
+        x,
+        y,
+        width: 0, 
+        height: 0,
+        rotation: 0,
+        zIndex: 10,
+        styleType: 'normal',
+        fontFamily: 'hand',
+        color: '#000',
+        fontSize: 24,
+        textAlign: 'left',
+        // Shape defaults
+        shapeType: drawMode.shapeType,
+        strokeColor: '#000',
+        strokeWidth: 2,
+        fillColor: 'transparent',
     };
 
-    updatePageElements(pageIndex, [...pages[pageIndex].elements, newElement]);
-    setSelectedId(newElement.id);
+    const pageIndex = pages.findIndex(p => p.id === editingPageId);
+    const newElements = [...pages[pageIndex].elements, newElement];
+    updatePageElements(pageIndex, newElements);
+    setSelectedId(id);
+  };
+
+  const handlePageMouseMove = (e: React.PointerEvent) => {
+    if (!isDrawing || !drawingStartRef.current || !selectedId || !editingPageId) return;
+    
+    const rect = e.currentTarget.getBoundingClientRect();
+    const currentX = e.clientX - rect.left;
+    const currentY = e.clientY - rect.top;
+    const startX = drawingStartRef.current.x;
+    const startY = drawingStartRef.current.y;
+
+    const width = Math.abs(currentX - startX);
+    const height = Math.abs(currentY - startY);
+    const x = Math.min(currentX, startX);
+    const y = Math.min(currentY, startY);
+
+    handleElementUpdate(selectedId, { x, y, width, height });
+  };
+
+  const handlePageMouseUp = () => {
+    if (isDrawing) {
+        setIsDrawing(false);
+        setDrawMode(null);
+        drawingStartRef.current = null;
+        // If created element is too small, give it default size
+        if (selectedId) {
+             const el = pages.find(p => p.id === editingPageId)?.elements.find(e => e.id === selectedId);
+             if (el && (el.width < 10 || el.height < 10)) {
+                 handleElementUpdate(selectedId, { width: 150, height: el.type === 'text' ? 50 : 150 });
+             }
+        }
+    }
   };
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
+    if (e.target.files && editingPageId) {
       Array.from(e.target.files).forEach(file => {
         const url = URL.createObjectURL(file);
-        const type = file.type.startsWith('video') ? 'video' : 'image';
-        addElement(type, url);
+        let type: ElementType = 'image';
+        if (file.type.startsWith('video')) type = 'video';
+        else if (file.type.startsWith('audio')) type = 'audio';
+
+        // Add immediately to center for uploaded media
+        const pageIndex = pages.findIndex(p => p.id === editingPageId);
+        
+        // Default dimensions
+        let width = 200;
+        let height = 200;
+        if (type === 'audio') {
+            width = 300;
+            height = 60;
+        }
+
+        const newElement: PageElement = {
+            id: generateId(),
+            type,
+            content: url,
+            x: 200, y: 200, width, height,
+            rotation: (Math.random() - 0.5) * 10,
+            zIndex: 10,
+            styleType: 'normal',
+            fontFamily: 'hand',
+            color: '#000',
+        };
+        updatePageElements(pageIndex, [...pages[pageIndex].elements, newElement]);
+        setSelectedId(newElement.id);
       });
     }
   };
@@ -156,6 +244,14 @@ export default function App() {
     }
   };
 
+  // --- Get Selected Element Helper ---
+  const getSelectedElement = () => {
+      if (!editingPageId || !selectedId) return null;
+      const page = pages.find(p => p.id === editingPageId);
+      return page?.elements.find(e => e.id === selectedId);
+  };
+  const selectedElement = getSelectedElement();
+
   // --- Rendering Helpers ---
 
   const getBackgroundClass = (bg: Page['background']) => {
@@ -177,18 +273,24 @@ export default function App() {
       );
     }
 
-    // Determine state
     const isEditingThisPage = editingPageId === page.id;
     const isEditingOtherPage = editingPageId && !isEditingThisPage;
     const isReadOnly = !isEditingThisPage;
 
+    // Use overflow-visible when editing this page so drag handles/buttons aren't clipped
+    const overflowClass = isEditingThisPage ? 'overflow-visible z-20' : 'overflow-hidden';
+
     return (
       <div 
-        className={`relative w-full h-full overflow-hidden shadow-inner ${getBackgroundClass(page.background)} transition-all duration-300 group
+        className={`relative w-full h-full ${overflowClass} shadow-inner ${getBackgroundClass(page.background)} transition-all duration-300 group
           ${isEditingOtherPage ? 'opacity-30 pointer-events-none grayscale' : ''}
           ${isEditingThisPage ? 'ring-4 ring-blue-500/30' : ''}
+          ${drawMode && isEditingThisPage ? 'cursor-crosshair' : ''}
         `}
-        onClick={() => allowInteraction && !isReadOnly && setSelectedId(null)}
+        onPointerDown={(e) => isEditingThisPage && handlePageMouseDown(e, page.id)}
+        onPointerMove={isEditingThisPage ? handlePageMouseMove : undefined}
+        onPointerUp={isEditingThisPage ? handlePageMouseUp : undefined}
+        onClick={() => allowInteraction && !isReadOnly && !isDrawing && setSelectedId(null)}
       >
         {/* Page Shadow Gradient */}
         <div className={`absolute inset-y-0 ${isLeft ? 'right-0 w-8 bg-gradient-to-l' : 'left-0 w-8 bg-gradient-to-r'} from-black/20 to-transparent pointer-events-none z-0 mix-blend-multiply`} />
@@ -224,20 +326,6 @@ export default function App() {
              <Edit3 size={18} />
           </button>
         )}
-
-        {/* EDIT MODE: Background Selector */}
-        {isEditingThisPage && (
-           <div className="absolute top-2 left-2 flex gap-1 z-50 bg-white/90 p-1 rounded-full shadow-sm border border-gray-200">
-             {(['white', 'grid', 'dots', 'dark', 'manga-lines'] as const).map(bg => (
-               <button 
-                 key={bg} 
-                 onClick={(e) => { e.stopPropagation(); setPageBackground(page.id, bg); }}
-                 className={`w-4 h-4 rounded-full border border-black ${bg === 'dark' ? 'bg-zinc-800' : 'bg-white'}`}
-                 title={bg}
-               />
-             ))}
-           </div>
-        )}
       </div>
     );
   };
@@ -272,48 +360,149 @@ export default function App() {
       }
   }
 
+  // --- Toolbar Component ---
+  const RibbonButton = ({ icon: Icon, label, onClick, active }: any) => (
+      <button 
+        onClick={onClick} 
+        className={`flex flex-col items-center justify-center p-2 rounded min-w-[50px] transition-colors
+            ${active ? 'bg-blue-100 text-blue-700' : 'hover:bg-gray-100 text-gray-700'}`}
+      >
+        <Icon size={22} className="mb-1" />
+        <span className="text-[10px] font-medium whitespace-nowrap">{label}</span>
+      </button>
+  );
+
+  const RibbonGroup = ({ label, children }: any) => (
+      <div className="flex flex-col gap-1 px-3 border-r border-gray-300 last:border-0 h-full justify-center">
+          <div className="flex gap-1 items-center justify-center h-full">
+            {children}
+          </div>
+          <span className="text-[10px] text-gray-400 font-bold uppercase tracking-wider text-center mt-auto pb-0.5">{label}</span>
+      </div>
+  );
+
   return (
     <div className="flex flex-col h-screen w-full bg-stone-100 font-sans">
       
-      {/* --- Dynamic Header --- */}
-      <header className="h-16 bg-white border-b-2 border-black flex items-center justify-between px-4 shrink-0 z-50 relative">
-         {/* Edit Mode Toolbar */}
-         {editingPageId ? (
-           <>
-              <div className="flex items-center gap-4 animate-in slide-in-from-top duration-300">
-                <button onClick={() => setEditingPageId(null)} className="flex items-center gap-2 text-gray-500 hover:text-black">
-                  <ArrowLeft size={20} /> <span className="font-bold">返回</span>
-                </button>
-                <div className="h-6 w-px bg-gray-300"></div>
-                
-                <label className="cursor-pointer hover:scale-105 transition-transform">
-                  <input type="file" multiple accept="image/*,video/*" className="hidden" onChange={handleFileUpload} />
-                  <div className="flex items-center gap-1 border-2 border-black px-3 py-1 rounded-lg bg-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] active:translate-y-[2px] active:shadow-none">
-                    <ImageIcon size={18} />
-                    <span className="font-bold text-sm">媒体</span>
+      {/* --- Dynamic Header (Ribbon Style) --- */}
+      {editingPageId ? (
+         <div className="bg-white border-b shadow-md z-50 animate-in slide-in-from-top duration-300">
+            {/* Top Bar: Back & Title */}
+            <div className="flex items-center justify-between px-4 py-1 border-b border-gray-100 bg-[#f3f2f1]">
+               <button onClick={() => setEditingPageId(null)} className="flex items-center gap-2 text-sm text-gray-600 hover:text-black hover:bg-gray-200 px-2 py-1 rounded">
+                  <ArrowLeft size={16} /> 返回浏览
+               </button>
+               <span className="text-xs font-mono text-gray-500">MANGA JOURNAL EDITOR</span>
+               <button onClick={() => setEditingPageId(null)} className="flex items-center gap-1 text-sm bg-black text-white px-4 py-1.5 rounded hover:bg-gray-800 shadow-sm">
+                  <Check size={14} /> 完成
+               </button>
+            </div>
+            
+            {/* Office Ribbon Toolbar */}
+            <div className="flex items-stretch px-2 py-2 h-24 overflow-x-auto scrollbar-hide bg-white">
+               
+               {/* 1. Images Group */}
+               <RibbonGroup label="图像">
+                   <label className="flex flex-col items-center justify-center p-2 hover:bg-gray-100 rounded cursor-pointer min-w-[50px]">
+                        <input type="file" multiple accept="image/*" className="hidden" onChange={handleFileUpload} />
+                        <ImageIcon size={22} className="mb-1 text-blue-600" />
+                        <span className="text-[10px] font-medium">图片</span>
+                   </label>
+               </RibbonGroup>
+
+               {/* 2. Illustrations (Shapes) */}
+               <RibbonGroup label="插图">
+                   <div className="grid grid-cols-3 gap-1 w-24">
+                        <button onClick={() => startDrawing('shape', 'rectangle')} className="p-1 hover:bg-gray-200 rounded flex justify-center"><Square size={16} /></button>
+                        <button onClick={() => startDrawing('shape', 'circle')} className="p-1 hover:bg-gray-200 rounded flex justify-center"><Circle size={16} /></button>
+                        <button onClick={() => startDrawing('shape', 'triangle')} className="p-1 hover:bg-gray-200 rounded flex justify-center"><Triangle size={16} /></button>
+                        <button onClick={() => startDrawing('shape', 'star')} className="p-1 hover:bg-gray-200 rounded flex justify-center"><Star size={16} /></button>
+                        <button onClick={() => startDrawing('shape', 'line')} className="p-1 hover:bg-gray-200 rounded flex justify-center"><Minus size={16} className="-rotate-45" /></button>
+                        <button onClick={() => startDrawing('shape', 'table')} className="p-1 hover:bg-gray-200 rounded flex justify-center"><Grid size={16} /></button>
+                   </div>
+               </RibbonGroup>
+
+               {/* 3. Text Group */}
+               <RibbonGroup label="文本">
+                   <RibbonButton 
+                     icon={TypeIcon} 
+                     label="文本框" 
+                     active={drawMode?.type === 'text'} 
+                     onClick={() => startDrawing('text')} 
+                   />
+               </RibbonGroup>
+
+               {/* 4. Text Format (Contextual) */}
+               {selectedElement && selectedElement.type === 'text' && (
+                  <RibbonGroup label="格式">
+                       <div className="flex flex-col gap-1 items-start">
+                           <div className="flex gap-1 border-b border-gray-200 pb-1 mb-1">
+                               <select 
+                                 className="text-xs border rounded p-1 w-24"
+                                 value={selectedElement.fontFamily}
+                                 onChange={(e) => handleElementUpdate(selectedElement.id, { fontFamily: e.target.value as any })}
+                               >
+                                   <option value="hand">手写体</option>
+                                   <option value="serif">宋体</option>
+                                   <option value="sans">黑体</option>
+                               </select>
+                               <div className="flex items-center border rounded px-1">
+                                  <button onClick={() => handleElementUpdate(selectedElement.id, { fontSize: Math.max(12, (selectedElement.fontSize || 24) - 2) })} className="hover:bg-gray-100 p-0.5"><Minus size={10} /></button>
+                                  <span className="text-xs w-6 text-center">{selectedElement.fontSize || 24}</span>
+                                  <button onClick={() => handleElementUpdate(selectedElement.id, { fontSize: Math.min(120, (selectedElement.fontSize || 24) + 2) })} className="hover:bg-gray-100 p-0.5"><Plus size={10} /></button>
+                               </div>
+                           </div>
+                           <div className="flex gap-1">
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { fontWeight: selectedElement.fontWeight === 'bold' ? 'normal' : 'bold' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.fontWeight === 'bold' ? 'bg-gray-300' : ''}`}><Bold size={14} /></button>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { fontStyle: selectedElement.fontStyle === 'italic' ? 'normal' : 'italic' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.fontStyle === 'italic' ? 'bg-gray-300' : ''}`}><Italic size={14} /></button>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { textDecoration: selectedElement.textDecoration === 'underline' ? 'none' : 'underline' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textDecoration === 'underline' ? 'bg-gray-300' : ''}`}><Underline size={14} /></button>
+                               <div className="w-px h-4 bg-gray-300 mx-1"></div>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { textAlign: 'left' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textAlign === 'left' ? 'bg-gray-300' : ''}`}><AlignLeft size={14} /></button>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { textAlign: 'center' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textAlign === 'center' ? 'bg-gray-300' : ''}`}><AlignCenter size={14} /></button>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { textAlign: 'right' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textAlign === 'right' ? 'bg-gray-300' : ''}`}><AlignRight size={14} /></button>
+                           </div>
+                       </div>
+                  </RibbonGroup>
+               )}
+
+               {/* 5. Media */}
+               <RibbonGroup label="媒体">
+                    <label className="flex flex-col items-center justify-center p-2 hover:bg-gray-100 rounded cursor-pointer min-w-[50px]">
+                        <input type="file" multiple accept="video/*" className="hidden" onChange={handleFileUpload} />
+                        <Video size={22} className="mb-1" />
+                        <span className="text-[10px] font-medium">视频</span>
+                    </label>
+                    <label className="flex flex-col items-center justify-center p-2 hover:bg-gray-100 rounded cursor-pointer min-w-[50px]">
+                        <input type="file" multiple accept="audio/*" className="hidden" onChange={handleFileUpload} />
+                        <Music size={22} className="mb-1" />
+                        <span className="text-[10px] font-medium">音频</span>
+                    </label>
+               </RibbonGroup>
+
+               {/* 6. Page Background (Design) */}
+               <RibbonGroup label="设计">
+                  <div className="grid grid-cols-2 gap-1">
+                      {(['white', 'grid', 'dots', 'dark', 'manga-lines'] as const).map(bg => (
+                        <button 
+                          key={bg} 
+                          onClick={() => setPageBackground(editingPageId, bg)}
+                          className={`w-5 h-5 rounded border hover:scale-110 transition-transform ${
+                            bg === 'white' ? 'bg-white' : 
+                            bg === 'dark' ? 'bg-zinc-800' : 
+                            bg === 'grid' ? 'bg-[url(https://bg.site/grid.png)] bg-gray-100' : 
+                            'bg-gray-200'
+                          } ${bg === 'dark' ? 'border-gray-600' : 'border-gray-300'}`}
+                          title={bg}
+                        />
+                      ))}
                   </div>
-                </label>
-                
-                <button onClick={() => addElement('text')} className="flex items-center gap-1 border-2 border-black px-3 py-1 rounded-lg bg-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:scale-105 active:translate-y-[2px] active:shadow-none transition-transform">
-                  <TypeIcon size={18} />
-                  <span className="font-bold text-sm">文字</span>
-                </button>
+               </RibbonGroup>
 
-                <button onClick={() => addElement('sticker', '★')} className="flex items-center gap-1 border-2 border-black px-3 py-1 rounded-lg bg-white shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] hover:scale-105 active:translate-y-[2px] active:shadow-none transition-transform">
-                  <StickyNote size={18} />
-                  <span className="font-bold text-sm">贴纸</span>
-                </button>
-              </div>
-
-              <div className="flex gap-2 animate-in slide-in-from-right duration-300">
-                 <button onClick={() => setEditingPageId(null)} className="flex items-center gap-1 px-4 py-2 bg-black text-white rounded-full hover:bg-gray-800 shadow-md font-bold">
-                    <Check size={18} /> 完成编辑
-                 </button>
-              </div>
-           </>
-         ) : (
-           /* Read Mode Toolbar */
-           <>
+            </div>
+         </div>
+      ) : (
+         /* Read Mode Header */
+         <header className="h-16 bg-white border-b-2 border-black flex items-center justify-between px-4 shrink-0 z-50">
               <div className="flex items-center gap-2">
                  <div className="bg-black text-white px-2 py-1 font-bold text-xl font-mono -rotate-2">漫画手账</div>
               </div>
@@ -326,12 +515,11 @@ export default function App() {
                    <Trash size={16} /> 删除整页
                  </button>
               </div>
-           </>
-         )}
-      </header>
+         </header>
+      )}
 
       {/* --- Main Workspace --- */}
-      <main className="flex-1 overflow-hidden flex items-center justify-center p-4 md:p-8 bg-[url('https://www.transparenttextures.com/patterns/concrete-wall.png')]">
+      <main className={`flex-1 overflow-hidden flex items-center justify-center p-4 md:p-8 bg-[url('https://www.transparenttextures.com/patterns/concrete-wall.png')] ${drawMode ? 'cursor-crosshair' : ''}`}>
         
         {/* Navigation Left (Hidden in Edit Mode) */}
         {!editingPageId && (
@@ -398,7 +586,7 @@ export default function App() {
       <footer className="h-8 bg-black text-white flex items-center justify-between px-4 text-xs font-mono">
          <span>页码: {viewIndex + 1} / {Math.ceil(pages.length / 2) + 1}</span>
          <span>{editingPageId ? '编辑模式' : '浏览模式'}</span>
-         <span>{selectedId ? '选中中...' : '就绪'}</span>
+         <span>{drawMode ? '绘制模式: 点击并拖动以创建' : selectedId ? '选中中...' : '就绪'}</span>
       </footer>
 
       <style>{`
@@ -411,6 +599,13 @@ export default function App() {
         @keyframes flipPrev {
           from { transform: rotateY(-180deg); }
           to { transform: rotateY(0deg); }
+        }
+        .scrollbar-hide::-webkit-scrollbar {
+            display: none;
+        }
+        .scrollbar-hide {
+            -ms-overflow-style: none;
+            scrollbar-width: none;
         }
       `}</style>
     </div>

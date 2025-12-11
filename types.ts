@@ -1,4 +1,5 @@
-export type ElementType = 'text' | 'image' | 'video' | 'sticker';
+
+export type ElementType = 'text' | 'image' | 'video' | 'sticker' | 'shape' | 'audio';
 
 export interface PageElement {
   id: string;
@@ -22,6 +23,13 @@ export interface PageElement {
   fontWeight?: 'normal' | 'bold';
   fontStyle?: 'normal' | 'italic';
   textDecoration?: 'none' | 'underline';
+  textAlign?: 'left' | 'center' | 'right';
+
+  // Shape properties
+  shapeType?: 'rectangle' | 'circle' | 'triangle' | 'star' | 'line' | 'table';
+  fillColor?: string;
+  strokeColor?: string;
+  strokeWidth?: number;
 }
 
 export interface Page {
