@@ -1,0 +1,46 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+    <title>Manga Journal</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Shippori+Mincho:wght@700&family=Noto+Sans+SC:wght@400;700&display=swap" rel="stylesheet">
+    <style>
+      /* Manga Halftone Pattern */
+      .bg-halftone {
+        background-image: radial-gradient(#000 1px, transparent 1px);
+        background-size: 8px 8px;
+      }
+      .bg-halftone-sm {
+        background-image: radial-gradient(#000 0.5px, transparent 0.5px);
+        background-size: 4px 4px;
+      }
+      
+      /* Hide scrollbar for clean UI */
+      ::-webkit-scrollbar {
+        width: 0px;
+        background: transparent;
+      }
+
+      body {
+        overscroll-behavior: none;
+        user-select: none;
+        -webkit-user-select: none;
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.2.1",
+    "react-dom/": "https://esm.sh/react-dom@^19.2.1/",
+    "react/": "https://esm.sh/react@^19.2.1/",
+    "lucide-react": "https://esm.sh/lucide-react@^0.559.0"
+  }
+}
+</script>
+</head>
+  <body class="bg-gray-100 overflow-hidden text-black antialiased">
+    <div id="root"></div>
+  </body>
+</html>
