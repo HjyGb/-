@@ -1,5 +1,5 @@
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { Page, PageElement, ElementType } from './types';
 import { TransformableElement } from './components/TransformableElement';
 import { 
@@ -7,7 +7,7 @@ import {
   Type as TypeIcon, StickyNote, Edit3, Check, ArrowLeft, 
   Square, Circle, Triangle, Star, Minus, Grid, Layout,
   Bold, Italic, Underline, AlignLeft, AlignCenter, AlignRight,
-  MousePointer, Video, Music
+  MousePointer, Video, Music, RotateCcw, RotateCw, ZoomIn, ZoomOut
 } from 'lucide-react';
 
 const generateId = () => Math.random().toString(36).substr(2, 9);
@@ -22,10 +22,24 @@ const INITIAL_PAGES: Page[] = [
 
 export default function App() {
   const [pages, setPages] = useState<Page[]>(INITIAL_PAGES);
+  
+  // Use Ref to track latest pages state for event callbacks (prevents stale closure issues)
+  const pagesRef = useRef(pages);
+  useEffect(() => {
+    pagesRef.current = pages;
+  }, [pages]);
+
+  // History State for Undo/Redo
+  const [history, setHistory] = useState<Page[][]>([INITIAL_PAGES]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+
   const [viewIndex, setViewIndex] = useState(0); 
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingPageId, setEditingPageId] = useState<string | null>(null);
   
+  // Zoom & View State
+  const [zoomLevel, setZoomLevel] = useState(1);
+
   // Drawing State
   const [drawMode, setDrawMode] = useState<{ type: ElementType | 'shape', shapeType?: PageElement['shapeType'] } | null>(null);
   const [isDrawing, setIsDrawing] = useState(false);
@@ -35,13 +49,57 @@ export default function App() {
   const [isFlipping, setIsFlipping] = useState(false);
   const [flipDirection, setFlipDirection] = useState<'next' | 'prev' | null>(null);
 
+  // --- Helpers ---
+  const getMaxZIndex = (pageId: string) => {
+    const page = pages.find(p => p.id === pageId);
+    if (!page || page.elements.length === 0) return 1;
+    return Math.max(...page.elements.map(e => e.zIndex)) + 1;
+  };
+
+  // --- History Management ---
+  const commitPages = (newPages: Page[]) => {
+      setPages(newPages);
+      
+      const newHistory = history.slice(0, historyIndex + 1);
+      newHistory.push(JSON.parse(JSON.stringify(newPages))); // Deep copy for safety
+      if (newHistory.length > 20) newHistory.shift(); // Limit history depth
+      
+      setHistory(newHistory);
+      setHistoryIndex(newHistory.length - 1);
+  };
+
+  // Call this when a continuous action (like dragging) ends, to save the *current* state
+  // We uses pagesRef.current to ensure we get the latest state even from stale closures
+  const recordHistory = () => {
+     commitPages(pagesRef.current);
+  };
+
+  const undo = () => {
+      if (historyIndex > 0) {
+          const newIndex = historyIndex - 1;
+          setHistoryIndex(newIndex);
+          setPages(JSON.parse(JSON.stringify(history[newIndex])));
+          setSelectedId(null);
+      }
+  };
+
+  const redo = () => {
+      if (historyIndex < history.length - 1) {
+          const newIndex = historyIndex + 1;
+          setHistoryIndex(newIndex);
+          setPages(JSON.parse(JSON.stringify(history[newIndex])));
+          setSelectedId(null);
+      }
+  };
+
   // --- Actions ---
 
   const addPage = () => {
     const newP1: Page = { id: generateId(), background: 'white', elements: [] };
     const newP2: Page = { id: generateId(), background: 'white', elements: [] };
-    setPages([...pages, newP1, newP2]);
-    triggerPageFlip('next', Math.ceil(pages.length / 2));
+    const newPages = [...pages, newP1, newP2];
+    commitPages(newPages);
+    triggerPageFlip('next', Math.ceil(newPages.length / 2));
   };
 
   const removeCurrentSpread = () => {
@@ -53,7 +111,7 @@ export default function App() {
     if (rightPageIndex < newPages.length) newPages.splice(rightPageIndex, 1);
     if (leftPageIndex < newPages.length) newPages.splice(leftPageIndex, 1);
     
-    setPages(newPages);
+    commitPages(newPages);
     setViewIndex(Math.max(0, viewIndex - 1));
   };
 
@@ -96,11 +154,14 @@ export default function App() {
     e.stopPropagation();
 
     const rect = e.currentTarget.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    // Adjust for zoom level
+    const x = (e.clientX - rect.left) / zoomLevel;
+    const y = (e.clientY - rect.top) / zoomLevel;
 
     drawingStartRef.current = { x, y };
     setIsDrawing(true);
+
+    const nextZ = getMaxZIndex(pageId);
 
     // Create temp element
     const id = generateId();
@@ -113,7 +174,7 @@ export default function App() {
         width: 0, 
         height: 0,
         rotation: 0,
-        zIndex: 10,
+        zIndex: nextZ,
         styleType: 'normal',
         fontFamily: 'hand',
         color: '#000',
@@ -128,7 +189,10 @@ export default function App() {
 
     const pageIndex = pages.findIndex(p => p.id === editingPageId);
     const newElements = [...pages[pageIndex].elements, newElement];
-    updatePageElements(pageIndex, newElements);
+    // We do NOT commit history here, only update state for visual feedback
+    const newPages = [...pages];
+    newPages[pageIndex] = { ...newPages[pageIndex], elements: newElements };
+    setPages(newPages);
     setSelectedId(id);
   };
 
@@ -136,8 +200,8 @@ export default function App() {
     if (!isDrawing || !drawingStartRef.current || !selectedId || !editingPageId) return;
     
     const rect = e.currentTarget.getBoundingClientRect();
-    const currentX = e.clientX - rect.left;
-    const currentY = e.clientY - rect.top;
+    const currentX = (e.clientX - rect.left) / zoomLevel;
+    const currentY = (e.clientY - rect.top) / zoomLevel;
     const startX = drawingStartRef.current.x;
     const startY = drawingStartRef.current.y;
 
@@ -158,7 +222,12 @@ export default function App() {
         if (selectedId) {
              const el = pages.find(p => p.id === editingPageId)?.elements.find(e => e.id === selectedId);
              if (el && (el.width < 10 || el.height < 10)) {
-                 handleElementUpdate(selectedId, { width: 150, height: el.type === 'text' ? 50 : 150 });
+                 // Use handleElementUpdate for immediate update, then commit
+                 const w = 150;
+                 const h = el.type === 'text' ? 50 : 150;
+                 handleElementUpdate(selectedId, { width: w, height: h }, true);
+             } else {
+                 recordHistory(); // Commit the drawing
              }
         }
     }
@@ -166,37 +235,47 @@ export default function App() {
 
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && editingPageId) {
-      Array.from(e.target.files).forEach(file => {
+      const pageIndex = pages.findIndex(p => p.id === editingPageId);
+      let currentElements = [...pages[pageIndex].elements];
+      let lastId = null;
+
+      Array.from(e.target.files).forEach((file: File, idx) => {
         const url = URL.createObjectURL(file);
         let type: ElementType = 'image';
         if (file.type.startsWith('video')) type = 'video';
         else if (file.type.startsWith('audio')) type = 'audio';
 
-        // Add immediately to center for uploaded media
-        const pageIndex = pages.findIndex(p => p.id === editingPageId);
-        
         // Default dimensions
         let width = 200;
         let height = 200;
         if (type === 'audio') {
             width = 300;
-            height = 60;
+            height = 100; // Increased for cassette
         }
+
+        const maxZ = currentElements.length > 0 ? Math.max(...currentElements.map(e => e.zIndex)) + 1 : 1;
 
         const newElement: PageElement = {
             id: generateId(),
             type,
             content: url,
-            x: 200, y: 200, width, height,
+            x: 100 + (idx * 20), // Stagger positions
+            y: 100 + (idx * 20),
+            width, height,
             rotation: (Math.random() - 0.5) * 10,
-            zIndex: 10,
+            zIndex: maxZ,
             styleType: 'normal',
             fontFamily: 'hand',
             color: '#000',
         };
-        updatePageElements(pageIndex, [...pages[pageIndex].elements, newElement]);
-        setSelectedId(newElement.id);
+        currentElements.push(newElement);
+        lastId = newElement.id;
       });
+      
+      const newPages = [...pages];
+      newPages[pageIndex] = { ...newPages[pageIndex], elements: currentElements };
+      commitPages(newPages);
+      if (lastId) setSelectedId(lastId);
     }
   };
 
@@ -206,7 +285,7 @@ export default function App() {
     setPages(newPages);
   };
 
-  const handleElementUpdate = (id: string, updates: Partial<PageElement>) => {
+  const handleElementUpdate = (id: string, updates: Partial<PageElement>, commit: boolean = false) => {
     let pageIdx = -1;
     let elIdx = -1;
 
@@ -222,7 +301,14 @@ export default function App() {
     if (pageIdx !== -1) {
       const newElements = [...pages[pageIdx].elements];
       newElements[elIdx] = { ...newElements[elIdx], ...updates };
-      updatePageElements(pageIdx, newElements);
+      
+      if (commit) {
+          const newPages = [...pages];
+          newPages[pageIdx] = { ...newPages[pageIdx], elements: newElements };
+          commitPages(newPages);
+      } else {
+          updatePageElements(pageIdx, newElements);
+      }
     }
   };
 
@@ -230,7 +316,9 @@ export default function App() {
     const pageIdx = pages.findIndex(p => p.elements.some(e => e.id === id));
     if (pageIdx !== -1) {
       const newElements = pages[pageIdx].elements.filter(e => e.id !== id);
-      updatePageElements(pageIdx, newElements);
+      const newPages = [...pages];
+      newPages[pageIdx] = { ...newPages[pageIdx], elements: newElements };
+      commitPages(newPages);
       setSelectedId(null);
     }
   };
@@ -240,7 +328,7 @@ export default function App() {
     if (pageIdx !== -1) {
       const newPages = [...pages];
       newPages[pageIdx].background = bg;
-      setPages(newPages);
+      commitPages(newPages);
     }
   };
 
@@ -278,11 +366,14 @@ export default function App() {
     const isReadOnly = !isEditingThisPage;
 
     // Use overflow-visible when editing this page so drag handles/buttons aren't clipped
-    const overflowClass = isEditingThisPage ? 'overflow-visible z-20' : 'overflow-hidden';
+    // touch-none prevents scrolling on mobile when drawing/dragging
+    const containerClass = isEditingThisPage 
+        ? 'overflow-visible z-20 touch-none' 
+        : 'overflow-hidden';
 
     return (
       <div 
-        className={`relative w-full h-full ${overflowClass} shadow-inner ${getBackgroundClass(page.background)} transition-all duration-300 group
+        className={`relative w-full h-full ${containerClass} shadow-inner ${getBackgroundClass(page.background)} transition-all duration-300 group
           ${isEditingOtherPage ? 'opacity-30 pointer-events-none grayscale' : ''}
           ${isEditingThisPage ? 'ring-4 ring-blue-500/30' : ''}
           ${drawMode && isEditingThisPage ? 'cursor-crosshair' : ''}
@@ -304,8 +395,9 @@ export default function App() {
             isSelected={selectedId === el.id}
             onSelect={setSelectedId}
             onUpdate={handleElementUpdate}
+            onInteractionEnd={recordHistory}
             onDelete={handleElementDelete}
-            scale={1}
+            scale={zoomLevel}
           />
         ))}
 
@@ -389,11 +481,11 @@ export default function App() {
          <div className="bg-white border-b shadow-md z-50 animate-in slide-in-from-top duration-300">
             {/* Top Bar: Back & Title */}
             <div className="flex items-center justify-between px-4 py-1 border-b border-gray-100 bg-[#f3f2f1]">
-               <button onClick={() => setEditingPageId(null)} className="flex items-center gap-2 text-sm text-gray-600 hover:text-black hover:bg-gray-200 px-2 py-1 rounded">
+               <button onClick={() => { setEditingPageId(null); setZoomLevel(1); }} className="flex items-center gap-2 text-sm text-gray-600 hover:text-black hover:bg-gray-200 px-2 py-1 rounded">
                   <ArrowLeft size={16} /> 返回浏览
                </button>
                <span className="text-xs font-mono text-gray-500">MANGA JOURNAL EDITOR</span>
-               <button onClick={() => setEditingPageId(null)} className="flex items-center gap-1 text-sm bg-black text-white px-4 py-1.5 rounded hover:bg-gray-800 shadow-sm">
+               <button onClick={() => { setEditingPageId(null); setZoomLevel(1); }} className="flex items-center gap-1 text-sm bg-black text-white px-4 py-1.5 rounded hover:bg-gray-800 shadow-sm">
                   <Check size={14} /> 完成
                </button>
             </div>
@@ -401,6 +493,21 @@ export default function App() {
             {/* Office Ribbon Toolbar */}
             <div className="flex items-stretch px-2 py-2 h-24 overflow-x-auto scrollbar-hide bg-white">
                
+               {/* History & Zoom */}
+               <RibbonGroup label="操作">
+                   <div className="flex flex-col gap-1 items-center justify-center">
+                       <div className="flex gap-1">
+                          <button onClick={undo} disabled={historyIndex === 0} className="p-1.5 rounded hover:bg-gray-200 disabled:opacity-30" title="撤销"><RotateCcw size={16} /></button>
+                          <button onClick={redo} disabled={historyIndex === history.length - 1} className="p-1.5 rounded hover:bg-gray-200 disabled:opacity-30" title="重做"><RotateCw size={16} /></button>
+                       </div>
+                       <div className="flex gap-1 border-t pt-1 border-gray-100">
+                          <button onClick={() => setZoomLevel(z => Math.max(0.5, z - 0.1))} className="p-1 rounded hover:bg-gray-200" title="缩小"><ZoomOut size={14} /></button>
+                          <span className="text-[10px] font-mono w-8 text-center">{Math.round(zoomLevel * 100)}%</span>
+                          <button onClick={() => setZoomLevel(z => Math.min(2, z + 0.1))} className="p-1 rounded hover:bg-gray-200" title="放大"><ZoomIn size={14} /></button>
+                       </div>
+                   </div>
+               </RibbonGroup>
+
                {/* 1. Images Group */}
                <RibbonGroup label="图像">
                    <label className="flex flex-col items-center justify-center p-2 hover:bg-gray-100 rounded cursor-pointer min-w-[50px]">
@@ -440,26 +547,26 @@ export default function App() {
                                <select 
                                  className="text-xs border rounded p-1 w-24"
                                  value={selectedElement.fontFamily}
-                                 onChange={(e) => handleElementUpdate(selectedElement.id, { fontFamily: e.target.value as any })}
+                                 onChange={(e) => handleElementUpdate(selectedElement.id, { fontFamily: e.target.value as any }, true)}
                                >
                                    <option value="hand">手写体</option>
                                    <option value="serif">宋体</option>
                                    <option value="sans">黑体</option>
                                </select>
                                <div className="flex items-center border rounded px-1">
-                                  <button onClick={() => handleElementUpdate(selectedElement.id, { fontSize: Math.max(12, (selectedElement.fontSize || 24) - 2) })} className="hover:bg-gray-100 p-0.5"><Minus size={10} /></button>
+                                  <button onClick={() => handleElementUpdate(selectedElement.id, { fontSize: Math.max(12, (selectedElement.fontSize || 24) - 2) }, true)} className="hover:bg-gray-100 p-0.5"><Minus size={10} /></button>
                                   <span className="text-xs w-6 text-center">{selectedElement.fontSize || 24}</span>
-                                  <button onClick={() => handleElementUpdate(selectedElement.id, { fontSize: Math.min(120, (selectedElement.fontSize || 24) + 2) })} className="hover:bg-gray-100 p-0.5"><Plus size={10} /></button>
+                                  <button onClick={() => handleElementUpdate(selectedElement.id, { fontSize: Math.min(120, (selectedElement.fontSize || 24) + 2) }, true)} className="hover:bg-gray-100 p-0.5"><Plus size={10} /></button>
                                </div>
                            </div>
                            <div className="flex gap-1">
-                               <button onClick={() => handleElementUpdate(selectedElement.id, { fontWeight: selectedElement.fontWeight === 'bold' ? 'normal' : 'bold' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.fontWeight === 'bold' ? 'bg-gray-300' : ''}`}><Bold size={14} /></button>
-                               <button onClick={() => handleElementUpdate(selectedElement.id, { fontStyle: selectedElement.fontStyle === 'italic' ? 'normal' : 'italic' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.fontStyle === 'italic' ? 'bg-gray-300' : ''}`}><Italic size={14} /></button>
-                               <button onClick={() => handleElementUpdate(selectedElement.id, { textDecoration: selectedElement.textDecoration === 'underline' ? 'none' : 'underline' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textDecoration === 'underline' ? 'bg-gray-300' : ''}`}><Underline size={14} /></button>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { fontWeight: selectedElement.fontWeight === 'bold' ? 'normal' : 'bold' }, true)} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.fontWeight === 'bold' ? 'bg-gray-300' : ''}`}><Bold size={14} /></button>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { fontStyle: selectedElement.fontStyle === 'italic' ? 'normal' : 'italic' }, true)} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.fontStyle === 'italic' ? 'bg-gray-300' : ''}`}><Italic size={14} /></button>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { textDecoration: selectedElement.textDecoration === 'underline' ? 'none' : 'underline' }, true)} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textDecoration === 'underline' ? 'bg-gray-300' : ''}`}><Underline size={14} /></button>
                                <div className="w-px h-4 bg-gray-300 mx-1"></div>
-                               <button onClick={() => handleElementUpdate(selectedElement.id, { textAlign: 'left' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textAlign === 'left' ? 'bg-gray-300' : ''}`}><AlignLeft size={14} /></button>
-                               <button onClick={() => handleElementUpdate(selectedElement.id, { textAlign: 'center' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textAlign === 'center' ? 'bg-gray-300' : ''}`}><AlignCenter size={14} /></button>
-                               <button onClick={() => handleElementUpdate(selectedElement.id, { textAlign: 'right' })} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textAlign === 'right' ? 'bg-gray-300' : ''}`}><AlignRight size={14} /></button>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { textAlign: 'left' }, true)} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textAlign === 'left' ? 'bg-gray-300' : ''}`}><AlignLeft size={14} /></button>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { textAlign: 'center' }, true)} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textAlign === 'center' ? 'bg-gray-300' : ''}`}><AlignCenter size={14} /></button>
+                               <button onClick={() => handleElementUpdate(selectedElement.id, { textAlign: 'right' }, true)} className={`p-1 rounded hover:bg-gray-200 ${selectedElement.textAlign === 'right' ? 'bg-gray-300' : ''}`}><AlignRight size={14} /></button>
                            </div>
                        </div>
                   </RibbonGroup>
@@ -533,7 +640,10 @@ export default function App() {
         )}
 
         {/* The 3D Book Container */}
-        <div className="relative w-full max-w-6xl aspect-[3/2]" style={{ perspective: '2000px' }}>
+        <div 
+            className="relative w-full max-w-6xl aspect-[3/2] transition-transform duration-200 ease-out origin-center" 
+            style={{ perspective: '2000px', transform: `scale(${zoomLevel})` }}
+        >
             <div className={`relative w-full h-full transform-style-3d bg-gray-300 border-4 border-black rounded-sm shadow-2xl transition-transform duration-500 ${editingPageId ? 'scale-[1.02]' : ''}`}>
                 
                 {/* Spine */}

@@ -1,14 +1,15 @@
 
 import React, { useRef, useState } from 'react';
 import { PageElement } from '../types';
-import { X, Layers, Palette, Type, ZoomIn, ZoomOut } from 'lucide-react';
+import { X, Layers, Palette, Type, ZoomIn, ZoomOut, ArrowUp, ArrowDown, Lock, Unlock, Music } from 'lucide-react';
 
 interface Props {
   element: PageElement;
   isSelected: boolean;
   readOnly?: boolean;
-  onSelect: (id: string) => void;
-  onUpdate: (id: string, updates: Partial<PageElement>) => void;
+  onSelect: (id: string | null) => void;
+  onUpdate: (id: string, updates: Partial<PageElement>, commit?: boolean) => void;
+  onInteractionEnd?: () => void;
   onDelete: (id: string) => void;
   scale: number; // Viewport scale for event calculation
 }
@@ -19,10 +20,12 @@ export const TransformableElement: React.FC<Props> = ({
   readOnly = false,
   onSelect,
   onUpdate,
+  onInteractionEnd,
   onDelete,
   scale,
 }) => {
   const [isEditing, setIsEditing] = useState(false);
+  const [isLocked, setIsLocked] = useState(false); // Local lock state for UI prevention
   const elementRef = useRef<HTMLDivElement>(null);
   const dragRef = useRef({
     startX: 0,
@@ -32,12 +35,13 @@ export const TransformableElement: React.FC<Props> = ({
     initialW: 0,
     initialH: 0,
     initialRot: 0,
+    hasMoved: false,
     mode: 'idle' as 'idle' | 'drag' | 'resize' | 'rotate',
   });
 
   // Handle pointer down for drag/resize/rotate
   const handlePointerDown = (e: React.PointerEvent, mode: 'drag' | 'resize' | 'rotate') => {
-    if (readOnly) return;
+    if (readOnly || isLocked) return;
     
     e.preventDefault();
     e.stopPropagation();
@@ -53,6 +57,7 @@ export const TransformableElement: React.FC<Props> = ({
       initialW: element.width,
       initialH: element.height,
       initialRot: element.rotation,
+      hasMoved: false,
       mode,
     };
 
@@ -62,6 +67,12 @@ export const TransformableElement: React.FC<Props> = ({
 
   const handlePointerMove = (e: PointerEvent) => {
     const { startX, startY, initialX, initialY, initialW, initialH, initialRot, mode } = dragRef.current;
+    
+    // Check if actually moved to avoid micro-jitters
+    if (Math.abs(e.clientX - startX) > 1 || Math.abs(e.clientY - startY) > 1) {
+        dragRef.current.hasMoved = true;
+    }
+
     const deltaX = (e.clientX - startX) / scale;
     const deltaY = (e.clientY - startY) / scale;
 
@@ -69,7 +80,7 @@ export const TransformableElement: React.FC<Props> = ({
       onUpdate(element.id, {
         x: initialX + deltaX,
         y: initialY + deltaY,
-      });
+      }, false);
     } else if (mode === 'resize') {
         const rad = (initialRot * Math.PI) / 180;
         const cos = Math.cos(rad);
@@ -79,30 +90,27 @@ export const TransformableElement: React.FC<Props> = ({
         const localDeltaY = -deltaX * sin + deltaY * cos;
 
         if (element.type === 'text') {
-           // Free resize for text
            onUpdate(element.id, {
               width: Math.max(50, initialW + localDeltaX),
               height: Math.max(30, initialH + localDeltaY),
-           });
+           }, false);
         } else if (element.type === 'shape') {
-           // Free resize for shapes
            onUpdate(element.id, {
               width: Math.max(20, initialW + localDeltaX),
               height: Math.max(20, initialH + localDeltaY),
-           });
+           }, false);
         } else if (element.type === 'audio') {
-           // Free resize for audio container
            onUpdate(element.id, {
               width: Math.max(150, initialW + localDeltaX),
-              height: Math.max(40, initialH + localDeltaY),
-           });
+              height: Math.max(60, initialH + localDeltaY), // Min height for cassette
+           }, false);
         } else {
            // Aspect ratio lock for images/videos
            const sizeChange = Math.max(localDeltaX, localDeltaY);
            onUpdate(element.id, {
                width: Math.max(50, initialW + sizeChange),
-               height: Math.max(50, initialH + (sizeChange * (initialH / initialW))), // Maintain aspect
-           });
+               height: Math.max(50, initialH + (sizeChange * (initialH / initialW))), 
+           }, false);
         }
 
     } else if (mode === 'rotate') {
@@ -119,11 +127,15 @@ export const TransformableElement: React.FC<Props> = ({
       
       onUpdate(element.id, {
         rotation: initialRot + rotationDelta,
-      });
+      }, false);
     }
   };
 
   const handlePointerUp = () => {
+    // Only save history if an actual modification occurred
+    if (dragRef.current.mode !== 'idle' && dragRef.current.hasMoved && onInteractionEnd) {
+      onInteractionEnd();
+    }
     dragRef.current.mode = 'idle';
     window.removeEventListener('pointermove', handlePointerMove);
     window.removeEventListener('pointerup', handlePointerUp);
@@ -148,15 +160,35 @@ export const TransformableElement: React.FC<Props> = ({
           />
         );
       case 'audio':
+        // Custom Cassette Tape Style
         return (
-          <div className="w-full h-full flex items-center justify-center bg-gray-50/50 border border-gray-200 rounded p-1">
-             <audio 
-               src={element.content} 
-               controls 
-               className="w-full h-full object-contain pointer-events-auto" 
-               // Prevent drag when interacting with audio controls
-               onPointerDown={(e) => e.stopPropagation()}
-             />
+          <div className="w-full h-full flex flex-col bg-zinc-800 rounded-lg p-2 border-2 border-zinc-600 shadow-sm relative overflow-hidden group">
+             {/* Cassette Texture */}
+             <div className="absolute inset-0 bg-[radial-gradient(#333_1px,transparent_1px)] bg-[size:4px_4px] opacity-20 pointer-events-none"></div>
+             
+             {/* Top Label Area */}
+             <div className="bg-white/90 h-1/3 rounded-sm mb-1 flex items-center px-2 shadow-inner">
+                <span className="text-[10px] font-mono text-black truncate w-full opacity-70">Mixtape Vol.1</span>
+             </div>
+
+             {/* Reel Circles */}
+             <div className="flex-1 bg-black/40 rounded border border-zinc-700 flex items-center justify-center gap-4 relative">
+                <div className="w-8 h-8 rounded-full border-4 border-white/20 bg-black animate-[spin_4s_linear_infinite] opacity-60"></div>
+                <div className="w-8 h-8 rounded-full border-4 border-white/20 bg-black animate-[spin_4s_linear_infinite] opacity-60"></div>
+                
+                {/* Audio controls overlay */}
+                <div className="absolute inset-0 flex items-center justify-center z-10 opacity-60 hover:opacity-100 transition-opacity">
+                   <audio 
+                     src={element.content} 
+                     controls 
+                     className="w-[95%] h-8 scale-90 origin-center pointer-events-auto" 
+                     onPointerDown={(e) => e.stopPropagation()}
+                   />
+                </div>
+             </div>
+             
+             {/* Bottom Decoration */}
+             <div className="absolute bottom-1 left-2 text-[8px] text-zinc-500 font-bold">TYPE I (NORMAL)</div>
           </div>
         );
       case 'shape':
@@ -213,8 +245,8 @@ export const TransformableElement: React.FC<Props> = ({
               className="w-full h-full bg-transparent resize-none outline-none p-2 overflow-hidden selection:bg-blue-200 block"
               style={textStyle}
               value={element.content}
-              onChange={(e) => onUpdate(element.id, { content: e.target.value })}
-              onBlur={() => setIsEditing(false)}
+              onChange={(e) => onUpdate(element.id, { content: e.target.value }, false)}
+              onBlur={() => { setIsEditing(false); onInteractionEnd?.(); }}
               onPointerDown={(e) => e.stopPropagation()} 
             />
           );
@@ -237,26 +269,21 @@ export const TransformableElement: React.FC<Props> = ({
     }
   };
 
-  // 1. Outer Layout Container Styles (Handles positioning, rotation, visible overflow for controls)
   const getOuterStyles = () => {
-    return `absolute select-none touch-none outline-none overflow-visible ${!readOnly ? 'cursor-move' : ''}`;
+    return `absolute select-none touch-none outline-none overflow-visible ${!readOnly && !isLocked ? 'cursor-move' : ''} ${isLocked ? 'pointer-events-none' : ''}`;
   };
 
-  // 2. Inner Content Container Styles (Handles Clipping, Borders, Backgrounds)
   const getInnerStyles = () => {
-    // Shapes and Audio usually handle their own bounds or don't need strict clipping boxes like polaroids
     if (element.type === 'shape' || element.type === 'audio') {
         return "w-full h-full relative";
     }
 
     let base = "w-full h-full bg-white overflow-hidden ";
-    
     if (element.styleType === 'polaroid') {
         base += "border-2 border-black p-2 pb-12 shadow-[4px_4px_0px_0px_rgba(0,0,0,1)] ";
     } else if (element.styleType === 'tape') {
         base += "border-0 shadow-lg ";
     } else {
-         // Normal style
          base += element.type === 'text' && element.styleType === 'normal' 
             ? "border border-dashed border-gray-400 " 
             : "border-2 border-black shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] ";
@@ -264,8 +291,7 @@ export const TransformableElement: React.FC<Props> = ({
     return base;
   };
 
-  // Boost Z-Index when selected so it floats above other elements for editing
-  // We use a high constant (50) for selected state, otherwise use element's own zIndex
+  // Boost Z-Index when selected
   const currentZIndex = isSelected && !readOnly ? 100 : element.zIndex;
 
   return (
@@ -279,99 +305,125 @@ export const TransformableElement: React.FC<Props> = ({
         zIndex: currentZIndex,
       }}
       onPointerDown={(e) => handlePointerDown(e, 'drag')}
-      onDoubleClick={() => !readOnly && element.type === 'text' && setIsEditing(true)}
+      onDoubleClick={() => !readOnly && !isLocked && element.type === 'text' && setIsEditing(true)}
     >
       {/* Inner Content Wrapper */}
       <div className={getInnerStyles()}>
          {renderContent()}
       </div>
 
-      {/* Tape Decoration (Outside inner wrapper to overlay) */}
+      {/* Tape Decoration */}
       {element.styleType === 'tape' && (
         <div className="absolute -top-3 left-1/2 -translate-x-1/2 w-16 h-6 bg-yellow-200/80 rotate-3 z-10 shadow-sm border border-yellow-400/50 pointer-events-none"></div>
       )}
 
-      {/* Selection UI (Outside inner wrapper to be visible) */}
+      {/* Lock Indicator (Visible even if not selected if locked) */}
+      {isLocked && (
+        <div className="absolute top-2 right-2 text-red-500 opacity-50 z-20 pointer-events-auto cursor-pointer" onClick={() => setIsLocked(false)}>
+            <Lock size={16} />
+        </div>
+      )}
+
+      {/* Selection UI */}
       {isSelected && !readOnly && !isEditing && (
         <>
-          <div className="absolute inset-0 border-2 border-blue-500 pointer-events-none z-50" />
+          <div className={`absolute inset-0 border-2 ${isLocked ? 'border-red-400 border-dashed' : 'border-blue-500'} pointer-events-none z-50`} />
           
-          {/* Rotate Handle */}
-          <div
-            className="absolute -top-10 left-1/2 -translate-x-1/2 w-7 h-7 bg-white border-2 border-black rounded-full cursor-grab active:cursor-grabbing flex items-center justify-center shadow-sm z-50 hover:bg-gray-100 pointer-events-auto"
-            onPointerDown={(e) => handlePointerDown(e, 'rotate')}
-          >
-            <span className="block w-1.5 h-1.5 bg-black rounded-full"></span>
-          </div>
-
-          {/* Resize Handle */}
-          <div
-            className="absolute -bottom-3.5 -right-3.5 w-7 h-7 bg-black border-2 border-white cursor-nwse-resize shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
-            onPointerDown={(e) => handlePointerDown(e, 'resize')}
-          />
-
-          {/* Delete Action */}
-          <button 
-             onClick={(e) => { e.stopPropagation(); onDelete(element.id); }} 
-             className="absolute -top-3.5 -right-3.5 w-7 h-7 bg-red-500 text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 hover:bg-red-600 transition-transform pointer-events-auto"
-             title="删除"
-          >
-             <X size={16} />
-          </button>
-
-          {/* Style/Type Action (Palette) */}
-          {element.type !== 'shape' && element.type !== 'audio' && (
-             <button 
-                onClick={(e) => { e.stopPropagation(); const newType = element.styleType === 'normal' ? 'polaroid' : element.styleType === 'polaroid' ? 'tape' : 'normal'; onUpdate(element.id, { styleType: newType }); }} 
-                className="absolute -bottom-3.5 -left-3.5 w-7 h-7 bg-black text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
-                title="切换样式"
-             >
-                <Palette size={16} />
-             </button>
-          )}
-
-          {/* Text Edit shortcut */}
-          {element.type === 'text' && (
-              <button 
-                onClick={(e) => { e.stopPropagation(); setIsEditing(true); }} 
-                className="absolute -top-3.5 -left-3.5 w-7 h-7 bg-black text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
-                title="编辑文本"
+          {!isLocked && (
+            <>
+              {/* Rotate Handle */}
+              <div
+                className="absolute -top-10 left-1/2 -translate-x-1/2 w-7 h-7 bg-white border-2 border-black rounded-full cursor-grab active:cursor-grabbing flex items-center justify-center shadow-sm z-50 hover:bg-gray-100 pointer-events-auto"
+                onPointerDown={(e) => handlePointerDown(e, 'rotate')}
               >
-                <Type size={16} />
-             </button>
-          )}
-          
-          {/* Layer shortcut for shapes */}
-          {element.type === 'shape' && (
-             <button 
-                onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { zIndex: element.zIndex + 1 }); }} 
-                className="absolute -bottom-3.5 -left-3.5 w-7 h-7 bg-black text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
-                title="上移一层"
-             >
-                <Layers size={16} />
-             </button>
-          )}
+                <span className="block w-1.5 h-1.5 bg-black rounded-full"></span>
+              </div>
 
-          {/* Font Size Shortcut for Text (Floating Left) */}
-          {element.type === 'text' && (
-             <div className="absolute top-1/2 -left-12 -translate-y-1/2 flex flex-col gap-2 z-50">
-                 <button 
-                    onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { fontSize: Math.min(120, (element.fontSize || 24) + 4) }); }}
-                    className="w-8 h-8 bg-white border border-gray-300 rounded-full flex items-center justify-center shadow hover:bg-gray-50"
-                    title="放大文字"
-                 >
-                    <ZoomIn size={16} />
-                 </button>
-                 <button 
-                    onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { fontSize: Math.max(12, (element.fontSize || 24) - 4) }); }}
-                    className="w-8 h-8 bg-white border border-gray-300 rounded-full flex items-center justify-center shadow hover:bg-gray-50"
-                    title="缩小文字"
-                 >
-                    <ZoomOut size={16} />
-                 </button>
-             </div>
-          )}
+              {/* Resize Handle */}
+              <div
+                className="absolute -bottom-3.5 -right-3.5 w-7 h-7 bg-black border-2 border-white cursor-nwse-resize shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
+                onPointerDown={(e) => handlePointerDown(e, 'resize')}
+              />
 
+              {/* Delete Action */}
+              <button 
+                onClick={(e) => { e.stopPropagation(); onDelete(element.id); }} 
+                className="absolute -top-3.5 -right-3.5 w-7 h-7 bg-red-500 text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 hover:bg-red-600 transition-transform pointer-events-auto"
+                title="删除"
+              >
+                <X size={16} />
+              </button>
+
+              {/* Layer Controls (Generic) */}
+              <div className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 flex gap-1 z-50">
+                  <button 
+                      onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { zIndex: element.zIndex + 1 }, true); }} 
+                      className="w-7 h-7 bg-white border-2 border-black rounded-full flex items-center justify-center shadow-md hover:scale-110 pointer-events-auto"
+                      title="上移一层"
+                  >
+                      <ArrowUp size={14} />
+                  </button>
+                   <button 
+                      onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { zIndex: Math.max(0, element.zIndex - 1) }, true); }} 
+                      className="w-7 h-7 bg-white border-2 border-black rounded-full flex items-center justify-center shadow-md hover:scale-110 pointer-events-auto"
+                      title="下移一层"
+                  >
+                      <ArrowDown size={14} />
+                  </button>
+              </div>
+
+              {/* Style/Type Action (Palette) */}
+              {element.type !== 'shape' && element.type !== 'audio' && (
+                <button 
+                    onClick={(e) => { e.stopPropagation(); const newType = element.styleType === 'normal' ? 'polaroid' : element.styleType === 'polaroid' ? 'tape' : 'normal'; onUpdate(element.id, { styleType: newType }, true); }} 
+                    className="absolute -bottom-3.5 -left-3.5 w-7 h-7 bg-black text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
+                    title="切换样式"
+                >
+                    <Palette size={16} />
+                </button>
+              )}
+
+              {/* Lock Action */}
+              <button 
+                  onClick={(e) => { e.stopPropagation(); setIsLocked(true); onSelect(null); }} 
+                  className="absolute top-1/2 -right-10 -translate-y-1/2 w-7 h-7 bg-white border-2 border-gray-300 rounded-full flex items-center justify-center shadow-md z-50 hover:bg-gray-100 pointer-events-auto"
+                  title="锁定元素"
+              >
+                  <Unlock size={14} className="text-gray-500" />
+              </button>
+
+              {/* Text Edit shortcut */}
+              {element.type === 'text' && (
+                  <button 
+                    onClick={(e) => { e.stopPropagation(); setIsEditing(true); }} 
+                    className="absolute -top-3.5 -left-3.5 w-7 h-7 bg-black text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
+                    title="编辑文本"
+                  >
+                    <Type size={16} />
+                </button>
+              )}
+
+              {/* Font Size Shortcut for Text */}
+              {element.type === 'text' && (
+                <div className="absolute top-1/2 -left-12 -translate-y-1/2 flex flex-col gap-2 z-50">
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { fontSize: Math.min(120, (element.fontSize || 24) + 4) }, true); }}
+                        className="w-8 h-8 bg-white border border-gray-300 rounded-full flex items-center justify-center shadow hover:bg-gray-50"
+                        title="放大文字"
+                    >
+                        <ZoomIn size={16} />
+                    </button>
+                    <button 
+                        onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { fontSize: Math.max(12, (element.fontSize || 24) - 4) }, true); }}
+                        className="w-8 h-8 bg-white border border-gray-300 rounded-full flex items-center justify-center shadow hover:bg-gray-50"
+                        title="缩小文字"
+                    >
+                        <ZoomOut size={16} />
+                    </button>
+                </div>
+              )}
+            </>
+          )}
         </>
       )}
     </div>
