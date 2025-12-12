@@ -43,6 +43,7 @@ export const TransformableElement: React.FC<Props> = ({
   const handlePointerDown = (e: React.PointerEvent, mode: 'drag' | 'resize' | 'rotate') => {
     if (readOnly || isLocked) return;
     
+    // Crucial for touch devices to prevent scrolling while dragging
     e.preventDefault();
     e.stopPropagation();
     onSelect(element.id);
@@ -63,16 +64,18 @@ export const TransformableElement: React.FC<Props> = ({
 
     window.addEventListener('pointermove', handlePointerMove);
     window.addEventListener('pointerup', handlePointerUp);
+    window.addEventListener('pointercancel', handlePointerUp);
   };
 
   const handlePointerMove = (e: PointerEvent) => {
     const { startX, startY, initialX, initialY, initialW, initialH, initialRot, mode } = dragRef.current;
     
     // Check if actually moved to avoid micro-jitters
-    if (Math.abs(e.clientX - startX) > 1 || Math.abs(e.clientY - startY) > 1) {
+    if (Math.abs(e.clientX - startX) > 2 || Math.abs(e.clientY - startY) > 2) {
         dragRef.current.hasMoved = true;
     }
 
+    // Divide delta by scale to ensure movement matches cursor regardless of zoom level
     const deltaX = (e.clientX - startX) / scale;
     const deltaY = (e.clientY - startY) / scale;
 
@@ -139,15 +142,16 @@ export const TransformableElement: React.FC<Props> = ({
     dragRef.current.mode = 'idle';
     window.removeEventListener('pointermove', handlePointerMove);
     window.removeEventListener('pointerup', handlePointerUp);
+    window.removeEventListener('pointercancel', handlePointerUp);
   };
 
   // Content Rendering
   const renderContent = () => {
-    const commonClasses = "w-full h-full object-cover pointer-events-none";
+    const commonClasses = "w-full h-full object-cover pointer-events-none select-none drag-none";
     
     switch (element.type) {
       case 'image':
-        return <img src={element.content} alt="user content" className={commonClasses} />;
+        return <img src={element.content} alt="user content" className={commonClasses} draggable={false} />;
       case 'video':
         return (
           <video 
@@ -270,7 +274,8 @@ export const TransformableElement: React.FC<Props> = ({
   };
 
   const getOuterStyles = () => {
-    return `absolute select-none touch-none outline-none overflow-visible ${!readOnly && !isLocked ? 'cursor-move' : ''} ${isLocked ? 'pointer-events-none' : ''}`;
+    // Add touch-action: none to prevent browser scrolling while dragging
+    return `absolute select-none outline-none overflow-visible ${!readOnly && !isLocked ? 'cursor-move' : ''} ${isLocked ? 'pointer-events-none' : ''}`;
   };
 
   const getInnerStyles = () => {
@@ -303,6 +308,7 @@ export const TransformableElement: React.FC<Props> = ({
         height: element.height,
         transform: `translate(${element.x}px, ${element.y}px) rotate(${element.rotation}deg)`,
         zIndex: currentZIndex,
+        touchAction: 'none'
       }}
       onPointerDown={(e) => handlePointerDown(e, 'drag')}
       onDoubleClick={() => !readOnly && !isLocked && element.type === 'text' && setIsEditing(true)}
@@ -333,42 +339,42 @@ export const TransformableElement: React.FC<Props> = ({
             <>
               {/* Rotate Handle */}
               <div
-                className="absolute -top-10 left-1/2 -translate-x-1/2 w-7 h-7 bg-white border-2 border-black rounded-full cursor-grab active:cursor-grabbing flex items-center justify-center shadow-sm z-50 hover:bg-gray-100 pointer-events-auto"
+                className="absolute -top-12 left-1/2 -translate-x-1/2 w-8 h-8 md:w-7 md:h-7 bg-white border-2 border-black rounded-full cursor-grab active:cursor-grabbing flex items-center justify-center shadow-sm z-50 hover:bg-gray-100 pointer-events-auto touch-none"
                 onPointerDown={(e) => handlePointerDown(e, 'rotate')}
               >
                 <span className="block w-1.5 h-1.5 bg-black rounded-full"></span>
               </div>
 
-              {/* Resize Handle */}
+              {/* Resize Handle - Larger touch target */}
               <div
-                className="absolute -bottom-3.5 -right-3.5 w-7 h-7 bg-black border-2 border-white cursor-nwse-resize shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
+                className="absolute -bottom-4 -right-4 w-8 h-8 md:w-6 md:h-6 bg-black border-2 border-white cursor-nwse-resize shadow-md z-50 pointer-events-auto touch-none"
                 onPointerDown={(e) => handlePointerDown(e, 'resize')}
               />
 
               {/* Delete Action */}
               <button 
                 onClick={(e) => { e.stopPropagation(); onDelete(element.id); }} 
-                className="absolute -top-3.5 -right-3.5 w-7 h-7 bg-red-500 text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 hover:bg-red-600 transition-transform pointer-events-auto"
+                className="absolute -top-4 -right-4 w-8 h-8 md:w-7 md:h-7 bg-red-500 text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 hover:bg-red-600 transition-transform pointer-events-auto"
                 title="删除"
               >
                 <X size={16} />
               </button>
 
               {/* Layer Controls (Generic) */}
-              <div className="absolute -bottom-3.5 left-1/2 -translate-x-1/2 flex gap-1 z-50">
+              <div className="absolute -bottom-10 md:-bottom-3.5 left-1/2 -translate-x-1/2 flex gap-2 z-50">
                   <button 
                       onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { zIndex: element.zIndex + 1 }, true); }} 
-                      className="w-7 h-7 bg-white border-2 border-black rounded-full flex items-center justify-center shadow-md hover:scale-110 pointer-events-auto"
+                      className="w-8 h-8 md:w-7 md:h-7 bg-white border-2 border-black rounded-full flex items-center justify-center shadow-md hover:scale-110 pointer-events-auto"
                       title="上移一层"
                   >
-                      <ArrowUp size={14} />
+                      <ArrowUp size={16} />
                   </button>
                    <button 
                       onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { zIndex: Math.max(0, element.zIndex - 1) }, true); }} 
-                      className="w-7 h-7 bg-white border-2 border-black rounded-full flex items-center justify-center shadow-md hover:scale-110 pointer-events-auto"
+                      className="w-8 h-8 md:w-7 md:h-7 bg-white border-2 border-black rounded-full flex items-center justify-center shadow-md hover:scale-110 pointer-events-auto"
                       title="下移一层"
                   >
-                      <ArrowDown size={14} />
+                      <ArrowDown size={16} />
                   </button>
               </div>
 
@@ -376,7 +382,7 @@ export const TransformableElement: React.FC<Props> = ({
               {element.type !== 'shape' && element.type !== 'audio' && (
                 <button 
                     onClick={(e) => { e.stopPropagation(); const newType = element.styleType === 'normal' ? 'polaroid' : element.styleType === 'polaroid' ? 'tape' : 'normal'; onUpdate(element.id, { styleType: newType }, true); }} 
-                    className="absolute -bottom-3.5 -left-3.5 w-7 h-7 bg-black text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
+                    className="absolute -bottom-4 -left-4 w-8 h-8 md:w-7 md:h-7 bg-black text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
                     title="切换样式"
                 >
                     <Palette size={16} />
@@ -386,42 +392,11 @@ export const TransformableElement: React.FC<Props> = ({
               {/* Lock Action */}
               <button 
                   onClick={(e) => { e.stopPropagation(); setIsLocked(true); onSelect(null); }} 
-                  className="absolute top-1/2 -right-10 -translate-y-1/2 w-7 h-7 bg-white border-2 border-gray-300 rounded-full flex items-center justify-center shadow-md z-50 hover:bg-gray-100 pointer-events-auto"
+                  className="absolute top-1/2 -right-12 -translate-y-1/2 w-8 h-8 md:w-7 md:h-7 bg-white border-2 border-gray-300 rounded-full flex items-center justify-center shadow-md z-50 hover:bg-gray-100 pointer-events-auto"
                   title="锁定元素"
               >
-                  <Unlock size={14} className="text-gray-500" />
+                  <Unlock size={16} className="text-gray-500" />
               </button>
-
-              {/* Text Edit shortcut */}
-              {element.type === 'text' && (
-                  <button 
-                    onClick={(e) => { e.stopPropagation(); setIsEditing(true); }} 
-                    className="absolute -top-3.5 -left-3.5 w-7 h-7 bg-black text-white border-2 border-white rounded-full flex items-center justify-center shadow-md z-50 hover:scale-110 transition-transform pointer-events-auto"
-                    title="编辑文本"
-                  >
-                    <Type size={16} />
-                </button>
-              )}
-
-              {/* Font Size Shortcut for Text */}
-              {element.type === 'text' && (
-                <div className="absolute top-1/2 -left-12 -translate-y-1/2 flex flex-col gap-2 z-50">
-                    <button 
-                        onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { fontSize: Math.min(120, (element.fontSize || 24) + 4) }, true); }}
-                        className="w-8 h-8 bg-white border border-gray-300 rounded-full flex items-center justify-center shadow hover:bg-gray-50"
-                        title="放大文字"
-                    >
-                        <ZoomIn size={16} />
-                    </button>
-                    <button 
-                        onClick={(e) => { e.stopPropagation(); onUpdate(element.id, { fontSize: Math.max(12, (element.fontSize || 24) - 4) }, true); }}
-                        className="w-8 h-8 bg-white border border-gray-300 rounded-full flex items-center justify-center shadow hover:bg-gray-50"
-                        title="缩小文字"
-                    >
-                        <ZoomOut size={16} />
-                    </button>
-                </div>
-              )}
             </>
           )}
         </>

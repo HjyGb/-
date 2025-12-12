@@ -3,7 +3,7 @@
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=0" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5" />
     <title>Manga Journal</title>
     <script src="https://cdn.tailwindcss.com"></script>
     <link href="https://fonts.googleapis.com/css2?family=Patrick+Hand&family=Shippori+Mincho:wght@700&family=Noto+Sans+SC:wght@400;700&display=swap" rel="stylesheet">
@@ -26,8 +26,8 @@
 
       body {
         overscroll-behavior: none;
-        user-select: none;
-        -webkit-user-select: none;
+        /* Prevent pull-to-refresh on mobile which conflicts with drawing */
+        touch-action: pan-x pan-y;
       }
     </style>
   <script type="importmap">
@@ -45,8 +45,8 @@
 }
 </script>
 </head>
-  <body class="bg-gray-100 overflow-hidden text-black antialiased">
-    <div id="root"></div>
+  <body class="bg-gray-100 overflow-hidden text-black antialiased fixed inset-0">
+    <div id="root" class="h-full w-full"></div>
     <script type="module" src="/index.tsx"></script>
   </body>
 </html>
