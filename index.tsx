@@ -90,8 +90,24 @@ if (!hasEnvKey && !hasStoredKey) {
     </React.StrictMode>
   );
 } else {
-  // Normal App Initialization
-  const roomId = new URLSearchParams(window.location.search).get("room") || "manga-journal-room-1";
+  // Logic to handle Room ID
+  const getRoomId = () => {
+    const params = new URLSearchParams(window.location.search);
+    const existingId = params.get("room");
+    if (existingId) return existingId;
+
+    // Generate random ID if missing
+    const newId = "journal-" + Math.random().toString(36).substring(2, 9);
+    
+    // Sync to URL immediately so refreshing keeps the room and copying URL works
+    const newUrl = new URL(window.location.href);
+    newUrl.searchParams.set("room", newId);
+    window.history.replaceState(null, "", newUrl.toString());
+    
+    return newId;
+  };
+
+  const roomId = getRoomId();
 
   const INITIAL_PAGES: Page[] = [
     { id: 'cover', background: 'manga-lines', elements: [

@@ -4,7 +4,7 @@ import { Page, PageElement, ElementType } from './types';
 import { TransformableElement } from './components/TransformableElement';
 import { Cursors } from './components/Cursors';
 import { 
-  useStorage, useMutation, useHistory, useMyPresence, useOthers 
+  useStorage, useMutation, useHistory, useMyPresence, useOthers, useRoom 
 } from './liveblocks.config';
 import { LiveObject, LiveList } from '@liveblocks/client';
 import { 
@@ -23,6 +23,7 @@ export default function App() {
   const history = useHistory();
   const [{ editingPageId, selectedId }, setPresence] = useMyPresence();
   const others = useOthers();
+  const room = useRoom();
 
   // --- Local View State (Not synced) ---
   const [viewIndex, setViewIndex] = useState(0); 
@@ -561,8 +562,9 @@ export default function App() {
               <div className="flex gap-2">
                  <button 
                     onClick={() => {
-                        const url = window.location.href;
-                        navigator.clipboard.writeText(url);
+                        const url = new URL(window.location.href);
+                        url.searchParams.set("room", room.id);
+                        navigator.clipboard.writeText(url.toString());
                         alert("链接已复制，发给朋友即可加入房间！");
                     }}
                     className="flex items-center gap-2 px-3 py-2 border-2 border-black bg-blue-100 text-blue-800 rounded-lg hover:bg-blue-200 shadow-[2px_2px_0px_0px_rgba(0,0,0,1)] font-bold text-xs"
